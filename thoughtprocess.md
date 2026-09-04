@@ -74,7 +74,68 @@ Agar hum direct `JournalEntry` se start karte, to tenant, entity, account owners
 
 ---
 
-## 3. `common.js` - Shared Building Blocks
+## 3. Complete SaaS Model Kaise Socha
+
+Ye application ek tenant ke liye installed software nahi hai. Ye shared SaaS platform hai jahan multiple agencies, MGAs, carriers aur businesses same application use karenge.
+
+### Login aur tenant accounting alag concepts hain
+
+Ek person ka ek global login ho sakta hai, lekin us user ki alag-alag tenants me alag membership hogi:
+
+```text
+User: finance@example.com
+  |
+  +--> Tenant A membership: Accountant
+  +--> Tenant B membership: Viewer
+```
+
+Isliye `User` me tenantId nahi rakha gaya. Agar user ko ek hi tenant se permanently bind kar denge to carrier consultant ya accountant multiple organizations handle nahi kar payega.
+
+### `TenantMembership`
+
+File: `src/models/tenant-membership.js`
+
+Ye actual authorization boundary hai. Isme `tenantId`, `userId`, tenant-specific `role`, allowed `entityIds`, membership `status`, aur invite/join timestamps hain.
+
+Same user multiple tenants me ho sakta hai, par har request ke saath active tenant context select hoga. Har protected query me membership verify hogi:
+
+```text
+JWT userId
+  -> active TenantMembership
+  -> tenantId + allowed entityIds
+  -> scoped service query
+```
+
+Sirf JWT me tenantId rakhna enough nahi hai, kyunki client token manipulate ya stale ho sakta hai. Server database membership ko authority maanega.
+
+### `User`
+
+File: `src/models/user.js`
+
+`User` me global identity aur login security rakhi gayi hai: email, password hash, optional external identity, status, MFA metadata aur last login. `passwordHash` ko normal queries se hide kiya gaya hai; plaintext password kabhi store nahi hoga.
+
+### `Subscription`
+
+File: `src/models/subscription.js`
+
+SaaS billing tenant-level resource hai. Isme plan, subscription status, Stripe/Razorpay readiness, billing period aur limits (users, entities, monthly bordereaux) hain. Subscription suspend hone par writes restrict ho sakti hain, lekin historical accounting delete nahi hogi.
+
+### SaaS isolation aur controlled collaboration
+
+```text
+Tenant A user -> Tenant A membership -> Tenant A query only
+Tenant B user -> Tenant B membership -> Tenant B query only
+
+MGA Tenant + Carrier Tenant
+  -> active CarrierConnection
+  -> allowed Bordereau workflow only
+```
+
+Carrier connection isolation ka exception nahi, controlled collaboration hai. Carrier ko MGA ke complete tenant documents nahi milte; authorized service sirf active connection ke allowed Bordereau/status data return karegi.
+
+---
+
+## 4. `common.js` - Shared Building Blocks
 
 File: `src/models/common.js`
 
@@ -132,7 +193,7 @@ Isse invalid values jaise `dollar` ya `US` reject hoti hain.
 
 ---
 
-## 4. `Tenant` Schema
+## 5. `Tenant` Schema
 
 File: `src/models/tenant.js`
 
@@ -181,7 +242,7 @@ Tenant root boundary hai. Baaki tenant-owned documents isi boundary ke andar reh
 
 ---
 
-## 5. `Entity` Schema
+## 6. `Entity` Schema
 
 File: `src/models/entity.js`
 
@@ -226,7 +287,7 @@ Code tenant ke andar unique hona chahiye. Lekin doosre tenant me same code valid
 
 ---
 
-## 6. `Account` Schema - Chart of Accounts
+## 7. `Account` Schema - Chart of Accounts
 
 File: `src/models/account.js`
 
@@ -283,7 +344,7 @@ Schema ye validate kar sakta hai ki parent ID ObjectId hai. Lekin ye prove nahi 
 
 ---
 
-## 7. `FiscalPeriod` Schema
+## 8. `FiscalPeriod` Schema
 
 File: `src/models/fiscal-period.js`
 
@@ -332,7 +393,7 @@ Do periods date range me overlap na karein, ye normal Mongoose unique index se e
 
 ---
 
-## 8. `JournalEntry` Schema - Core Accounting Record
+## 9. `JournalEntry` Schema - Core Accounting Record
 
 File: `src/models/journal-entry.js`
 
@@ -442,7 +503,243 @@ Schema me immutable fields aur update/delete hooks initial guard provide karte h
 
 ---
 
-## 9. `AccountingEvent` Schema - Business Action Se Ledger Tak
+## 10. Bordereau Ka Complete Scene
+
+README ke reference flow me bordereau important hai. Ab is workflow ke liye actual models implement hain: `carrier-connection.js`, `bordereau.js`, `bordereau-transaction.js`, aur `bordereau-ingestion-run.js`. Ledger foundation pehle banane ka reason ye tha ki bordereau ingestion ka final output journal entries hota hai.
+
+### Bordereau hota kya hai?
+
+Bordereau MGA ya broker ki taraf se carrier ko bheja gaya production/settlement statement hai. Isme policy-level rows hoti hain, jaise:
+
+```text
+Policy number
+Insured
+Effective date
+State
+Gross premium
+Broker commission
+MGA fee/override
+Tax and fees
+Net carrier settlement
+```
+
+Ye simple file upload nahi hai. Ye operational data ko validate karke accounting state me convert karne wala workflow hai.
+
+### Bordereau ke liye teen documents kyun sochne chahiye?
+
+Ek hi huge document me header, har row aur processing errors rakhne se retry, debugging aur reporting difficult ho jayegi. Isliye logical separation:
+
+```text
+Bordereau
+  |
+  +--> BordereauRow[]
+  +--> BordereauIngestionRun[]
+```
+
+#### 1. `Bordereau`
+
+Ye submission ka header/identity document hoga.
+
+Implemented fields:
+
+- `tenantId`: kis tenant ki submission hai.
+- `mgaEntityId`: submitting MGA.
+- `carrierEntityId`: receiving carrier.
+- `periodStart`, `periodEnd`: production period.
+- `bordereauNumber`: tenant ke andar unique submission number.
+- `billingModel`: DBA, DBM ya DBC.
+- `currency`: submission currency.
+- `status`: draft, submitted, validating, accepted, rejected, ingested, posted.
+- `sourceFileId`: uploaded original document ka reference.
+- `rowCount`, `grossPremiumMinor`, `taxMinor`, `commissionMinor`, `netSettlementMinor`: summary totals.
+- `submittedBy`, `submittedAt`, `acceptedAt`: workflow evidence.
+- `correlationId`: related settlement/journals ko trace karne ke liye.
+
+#### 2. `BordereauRow`
+
+Ye policy-level financial/operational row hogi. Isse separate collection rakhna better hai kyunki ek bordereau me hundreds ya thousands of policies ho sakti hain.
+
+Implemented fields:
+
+- `tenantId`, `bordereauId`: ownership and parent connection.
+- `policyId`: existing policy ka reference.
+- `policyNumber`: external/business identifier.
+- `insuredPartyId`: insured reference.
+- `state`, `lineOfBusiness`: reporting dimensions.
+- `grossPremiumMinor`: total premium.
+- `brokerCommissionMinor`: broker share.
+- `mgaFeeMinor`: MGA override/program fee.
+- `taxMinor`, `feesMinor`: liabilities/fees.
+- `netCarrierSettlementMinor`: carrier ko payable amount.
+- `currency`: ISO currency.
+- `rowStatus`: pending, valid, invalid, posted.
+- `validationErrors`: row-level errors.
+- `sourceRowNumber`: original file row for traceability.
+
+#### 3. `BordereauIngestionRun`
+
+Ye processing attempt ka record hoga. Iski zarurat retry aur audit ke liye hai.
+
+Implemented fields:
+
+- `tenantId`, `bordereauId`.
+- `idempotencyKey`: same file/request dobara process hone par duplicate state roke.
+- `status`: received, validating, failed, completed.
+- `totalRows`, `validRows`, `invalidRows`.
+- `duplicateRows`, `rejectedRows`.
+- `errorSummary`.
+- `startedAt`, `completedAt`, `startedBy`.
+- `journalEntryIds`: generated accounting entries.
+
+### Bordereau ka connection graph
+
+```text
+MGA Entity
+   |
+   +--> Bordereau
+           |
+           +--> BordereauRow --> Policy --> Insured/Parties
+           |
+           +--> IngestionRun
+           |
+           +--> AccountingEvent: BordereauAccepted/Ingested
+                         |
+                         +--> JournalEntry for MGA/carrier entity
+                         +--> ApprovalRequest if threshold crossed
+                         +--> AuditLog
+```
+
+### Bordereau-first operational flow
+
+README ka standard flow ye hai:
+
+```text
+1. MGA production submit karta hai.
+2. System bordereau header aur rows save karta hai.
+3. Validation run duplicate policy rows, required fields aur totals check karta hai.
+4. Carrier submission ingest/accept karta hai.
+5. Accounting event publish hota hai.
+6. Accounting engine journals generate karta hai.
+7. MGA carrier payable settle karta hai.
+8. Carrier incoming cash ko receivable se match karta hai.
+```
+
+### Validation me kya check hoga?
+
+#### Row-level checks
+
+- Required policy number present hai.
+- Policy tenant ke andar exist karti hai.
+- Policy duplicate row me repeat nahi hui.
+- Effective date aur state valid hain.
+- Premium amounts integer minor units me hain.
+- Commission premium se zyada nahi hai.
+- Tax negative nahi hai.
+- Currency consistent hai.
+
+#### Header/total checks
+
+- Row totals header totals se match karte hain.
+- `gross premium - commissions - tax/fees` business rule ke according net settlement se match karta hai.
+- MGA aur carrier relationship authorized hai.
+- Period open/valid hai.
+- Same `idempotencyKey` ka successful ingestion pehle nahi hua.
+
+### Bordereau se journal kaise banegi?
+
+Actual debit-credit billing model par depend karega. Generic example:
+
+```text
+Debit  Carrier Receivable       net carrier settlement
+Debit  Commission Expense       broker commission
+Credit Premium/Settlement Revenue gross or applicable amount
+Credit Tax Liability             tax and fees
+```
+
+Exact accounts tenant ke chart of accounts aur DBA/DBM/DBC rule se resolve honge. Bordereau model ko khud account balances update nahi karne chahiye. Uska kaam validated production data dena hai; accounting event aur accounting engine journal create karega.
+
+### DBA / DBM / DBC me difference
+
+- `DBA / Agency Bill`: insured broker ko pay karta hai; broker MGA/carrier settlement banata hai.
+- `DBM / Direct Bill to MGA`: insured MGA ko pay karta hai; MGA carrier payable aur broker commission payable track karta hai.
+- `DBC / Direct Bill to Carrier`: insured carrier ko pay karta hai; carrier receivable/reserve aur MGA/broker payable track karta hai.
+
+Isliye `billingModel` bordereau header par rakhna important hai. Same row data ka journal mapping billing model ke basis par change ho sakta hai.
+
+### Bordereau aur current schemas
+
+- `Bordereau.tenantId` -> `Tenant._id`
+- `Bordereau.mgaEntityId` -> `Entity._id`
+- `Bordereau.carrierEntityId` -> `Entity._id`
+- `BordereauRow.bordereauId` -> `Bordereau._id`
+- `BordereauRow.policyId` -> future `Policy._id`
+- `BordereauIngestionRun.bordereauId` -> `Bordereau._id`
+- `AccountingEvent.sourceDocumentId` -> `Bordereau._id`
+- `JournalEntry.accountingEventId` -> `AccountingEvent._id`
+- `JournalEntry.correlationId` -> bordereau settlement workflow
+- `AuditLog.resourceId` -> bordereau/run/journal ID
+
+### Carrier connection request ka model
+
+File: `src/models/carrier-connection.js`
+
+Carrier ko sirf `carrierEntityId` se connect nahi kiya gaya, kyunki carrier kisi doosre tenant ka owner ho sakta hai. `CarrierConnection` dono sides ko explicitly record karta hai:
+
+- `requesterTenantId` + `requesterEntityId`: MGA side.
+- `carrierTenantId` + `carrierEntityId`: carrier side.
+- `status`: pending, active, rejected, suspended ya revoked.
+- `permissions`: submit, view, accept aur settlement posting capabilities.
+- `requestedBy`, `decidedBy`, timestamps: request aur approval history.
+- `configuration`: carrier reference, frequency aur required fields.
+
+Flow:
+
+```text
+MGA user login
+  -> MGA apne tenant se carrier configure/select karta hai
+  -> CarrierConnection status = pending
+  -> Carrier tenant ka authorized user request dekhta hai
+  -> Carrier approve karta hai
+  -> status = active
+  -> MGA active connection ke through bordereau submit karta hai
+```
+
+MGA tenant ka accounting data carrier tenant ko automatically expose nahi hota. Carrier ko authorized service query ke through sirf connection ke allowed bordereau/status data dikhaya jayega. Dono tenants ke journals aur accounts apne-apne `tenantId` aur `entityId` me isolated rahenge.
+
+### Transaction-based implementation
+
+`BordereauTransaction` ko header me embedded array nahi banaya gaya, kyunki ek submission me bahut saari policy transactions ho sakti hain. Separate records se individual transaction validate, duplicate detect, correct aur paginate ki ja sakti hai.
+
+Transaction arithmetic:
+
+```text
+net carrier settlement
+  = gross premium
+  - broker commission
+  - MGA fee
+  - tax
+  - other fees
+```
+
+Current schema isi arithmetic ko validate karta hai. `direction: reversal` future correction flow ke liye hai; posted journal mutate karne ke bajay reversal transaction aur reversing journal create hogi.
+
+### Important design decision
+
+Bordereau ko direct `JournalEntry` ka child nahi banana hai. Correct direction ye hai:
+
+```text
+Bordereau data
+  -> validation
+  -> ingestion event
+  -> accounting rules
+  -> journal entry
+```
+
+Isse operational correction aur accounting correction alag rehte hain. Invalid bordereau ko edit/re-upload kiya ja sakta hai; posted journal ko edit nahi, reversing/adjusting entry se correct kiya jayega.
+
+---
+
+## 11. `AccountingEvent` Schema - Business Action Se Ledger Tak
 
 File: `src/models/accounting-event.js`
 
@@ -503,7 +800,7 @@ Event status transition transaction ke andar honi chahiye. Agar event `processed
 
 ---
 
-## 10. `ApprovalRequest` Schema
+## 12. `ApprovalRequest` Schema
 
 File: `src/models/approval-request.js`
 
@@ -568,7 +865,7 @@ Schema array me duplicate approvers ya incorrect step order fully enforce nahi k
 
 ---
 
-## 11. `AuditLog` Schema
+## 13. `AuditLog` Schema
 
 File: `src/models/audit-log.js`
 
@@ -622,7 +919,7 @@ Ideally business write aur audit write same MongoDB transaction me honi chahiye.
 
 ---
 
-## 12. Complete Connection Example
+## 14. Complete Connection Example
 
 Reference scenario: USD 39,260 invoice issue hui.
 
@@ -670,7 +967,7 @@ Schemas me `ref` sirf relationship information deta hai. `ref` automatic authori
 
 ---
 
-## 13. Kya Schema Enforce Karta Hai, Kya Service Karegi
+## 15. Kya Schema Enforce Karta Hai, Kya Service Karegi
 
 ### Schema/Mongoose level
 
@@ -706,7 +1003,7 @@ Ye separation intentional hai. Schema local document shape validate karta hai; s
 
 ---
 
-## 14. Naming Aur Indexing Ka Thought Process
+## 16. Naming Aur Indexing Ka Thought Process
 
 ### Naming
 
@@ -732,18 +1029,18 @@ Unique indexes global nahi rakhe gaye, kyunki same account code ya entity code a
 
 ---
 
-## 15. Future Schemas Kaise Add Honge
+## 17. Future Schemas Kaise Add Honge
 
 Next domain layers is dependency order me add karni chahiye:
 
-1. `User`, `Role`, `Permission`, tenant memberships.
+1. `Role`, `Permission`, auth sessions and refresh-token rotation.
 2. `Party` for insured, broker, MGA, carrier, vendors.
 3. `Policy`, `Coverage`, `PolicyTransaction`.
 4. `Invoice`, `InvoiceLine`, credit/debit memos.
 5. `Payment`, `PaymentAllocation`, `Disbursement`.
 6. `BankAccount`, statements, transactions and reconciliation.
 7. Commission and tax schemas.
-8. Bordereau and ingestion runs.
+8. Bordereau and carrier-connection APIs/services.
 9. Reinsurance treaties, cessions, recoverables.
 10. Documents, webhooks, outbox events and reporting definitions.
 
@@ -763,7 +1060,7 @@ Domain module ko direct ledger totals update nahi karne chahiye.
 
 ---
 
-## 16. Current Design Ka Short Summary
+## 18. Current Design Ka Short Summary
 
 Simple words me:
 
@@ -775,5 +1072,12 @@ Simple words me:
 - `AccountingEvent` business action ko accounting se connect karta hai aur retry duplicate rokta hai.
 - `ApprovalRequest` posting se pehle control lagata hai.
 - `AuditLog` complete history preserve karta hai.
+- `User` global login identity hai.
+- `TenantMembership` user ko tenant-specific role aur entity access deta hai.
+- `Subscription` SaaS plan, billing status aur product limits rakhta hai.
+- `CarrierConnection` MGA aur carrier tenants ke beech controlled request/approval boundary hai.
+- `BordereauTransaction` policy-level production ko transaction basis par validate karta hai.
+
+Current code SaaS persistence foundation tak aa gaya hai. Complete SaaS workflow ke liye next implementation auth routes, JWT/refresh-token service, tenant-context middleware, membership authorization, carrier connection request APIs, Bordereau submission/acceptance APIs, aur accounting transaction service honge.
 
 Is design ka central rule hai: financial state ko directly mutate nahi karna; validated event ke through controlled journal posting karni hai.

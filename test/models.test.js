@@ -1,7 +1,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const mongoose = require('mongoose');
-const { FiscalPeriod, JournalEntry } = require('../src/models');
+const { BordereauTransaction, FiscalPeriod, JournalEntry } = require('../src/models');
 
 const id = () => new mongoose.Types.ObjectId();
 
@@ -48,4 +48,48 @@ test('fiscal period rejects an end date before its start date', async () => {
   });
 
   await assert.rejects(period.validate(), /End date must be after start date/);
+});
+
+test('bordereau transaction validates the net carrier settlement', async () => {
+  const transaction = new BordereauTransaction({
+    tenantId: id(),
+    bordereauId: id(),
+    policyNumber: 'POL-001',
+    transactionId: 'TX-001',
+    transactionType: 'bind',
+    effectiveDate: new Date('2026-01-15'),
+    state: 'TX',
+    lineOfBusiness: 'Commercial Trucking',
+    grossPremiumMinor: 3926000,
+    brokerCommissionMinor: 250000,
+    mgaFeeMinor: 350000,
+    taxMinor: 350300,
+    feesMinor: 0,
+    netCarrierSettlementMinor: 2975700,
+    currency: 'USD'
+  });
+
+  await assert.doesNotReject(transaction.validate());
+});
+
+test('bordereau transaction rejects incorrect settlement arithmetic', async () => {
+  const transaction = new BordereauTransaction({
+    tenantId: id(),
+    bordereauId: id(),
+    policyNumber: 'POL-001',
+    transactionId: 'TX-002',
+    transactionType: 'bind',
+    effectiveDate: new Date('2026-01-15'),
+    state: 'TX',
+    lineOfBusiness: 'Commercial Trucking',
+    grossPremiumMinor: 3926000,
+    brokerCommissionMinor: 250000,
+    mgaFeeMinor: 350000,
+    taxMinor: 350300,
+    feesMinor: 0,
+    netCarrierSettlementMinor: 2975701,
+    currency: 'USD'
+  });
+
+  await assert.rejects(transaction.validate(), /Net carrier settlement/);
 });
