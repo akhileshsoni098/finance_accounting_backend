@@ -98,9 +98,9 @@ NOTE: Frontend = finance_accounting_frontend
 ------------------------------------------------------------
 [ DONE ] TESTS & QUALITY
 ------------------------------------------------------------
-14. Backend tests - 27/27 PASSING (npm test)
+14. Backend tests - 43/43 PASSING (npm test)
     - test/auth.test.js, test/role.test.js, test/subscription.test.js,
-      test/payment.test.js
+      test/payment.test.js, test/tenant.test.js, test/user.test.js
     - Test DB isolation: per-file suffix, drop DB on connect/disconnect
     - --test-concurrency=1
 
@@ -117,18 +117,97 @@ NOTE: Frontend = finance_accounting_frontend
     - Renewal after cancel -> active again
     - Restore trial state (southlake)
 
+------------------------------------------------------------
+[ DONE ] TENANT MODULE - COMPLETE (Backend + Frontend)
+------------------------------------------------------------
+17. Tenant repository (backend)
+    - tenant.repository.js: updateById (returnDocument:after, runValidators)
+      + findAll (createdAt DESC) add kiye
+
+18. Tenant service (backend)
+    - updateTenant(): whitelist fields (name/email/phone/website/logo/
+      setupStage/status) - code/businessType change BLOCKED (400)
+    - listTenants(): sab tenants (super admin ke liye)
+    - toPublic(): logo + createdAt ab response me aata hai
+
+19. Tenant controller + routes (backend)
+    - GET /tenants: super admin (role */*) -> SAB tenants; normal user
+      -> sirf apna tenant
+    - PATCH /tenants/:id: requireAuth -> requireValidSubscription
+      -> requirePermission("tenants","update") -> self-scope 404 guard
+    - Auth registration orchestration UNTOUCHED (transaction: tenant ->
+      subscription -> super_admin role -> admin user)
+
+20. Tenant tests + verify (backend)
+    - test/tenant.test.js (new): update own tenant, foreign tenant 404,
+      code/businessType 400, unknown field/bad email/bad status 400,
+      permission guard 403, super admin list all
+    - FULL SUITE: 35/35 PASSING (npm test)
+    - LIVE SMOKE (real DB): super admin lists SIDE01 + Southlake;
+      PATCH phone/website/setupStage -> persisted -> restored
+
+21. Tenant frontend (frontend)
+    - src/api/tenant.js (new): getTenants/getTenantById/updateTenant
+      (auth.js se move kiya)
+    - TenantDetailPage.jsx: Edit button + inline form (name/email/phone/
+      website/logo/setupStage/status) -> PATCH -> refreshSession()
+    - TenantsPage.jsx import update
+    - Lint CLEAN, build PASSES (282.48 kB)
+
+------------------------------------------------------------
+[ DONE ] USERS MODULE - COMPLETE (Backend + Frontend)
+------------------------------------------------------------
+22. User repository (backend)
+    - user.repository.js: findByTenantId (role populate + createdAt DESC),
+      findByIdAndTenant, updateById add kiye
+
+23. User service + validators (backend)
+    - createUser: initial password + status active; roleId tenant-checked
+    - updateUser: whitelist (displayName/email/avatar/roleId/status),
+      tenantId BLOCKED, foreign roleId 400
+    - suspendUser/activateUser + self-lockout guard (CANNOT_SUSPEND_SELF)
+    - NO delete endpoint (suspend only) - users:delete keep sirf catalog me
+    - user.validator.js: strict create/update (unknown field reject)
+    - toPublic: avatar + populated role {id,name,key} + createdAt
+
+24. User controller + routes (backend)
+    - 6 tenant-scoped handlers (foreign id -> 404 USER_NOT_FOUND)
+    - GET /users, POST /users, GET /users/:id, PATCH /users/:id,
+      POST /users/:id/suspend, POST /users/:id/activate
+    - har route: requireAuth -> requireValidSubscription
+      -> requirePermission("users", read/create/update)
+    - auth.service: suspended user login -> ACCOUNT_SUSPENDED (403)
+
+25. User tests + verify (backend)
+    - test/user.test.js (new): list with role, create 201, duplicate 409,
+      foreign role 400, foreign user 404, update, suspend blocks login /
+      activate restores, self-suspend 400, permission guard 403
+    - FULL SUITE: 43/43 PASSING (npm test)
+    - LIVE SMOKE (real DB via proxy): create -> login OK -> suspend ->
+      ACCOUNT_SUSPENDED -> activate -> login OK -> temp user cleaned
+
+26. Users frontend (frontend)
+    - src/api/users.js (new): getUsers/getUserById/createUser/updateUser/
+      suspendUser/activateUser + getRoles
+    - UsersPage.jsx: table (name/email/role/status/last login) +
+      Suspend/Activate row actions + "(you)" self tag
+    - CreateUserModal.jsx: name/email/password/role dropdown + success state
+    - Nav: naya "Organization" section (Users + Tenants), /users route
+    - StatusBadge: suspended/disabled/invited tones add
+    - Lint CLEAN, build PASSES (292.02 kB)
+
 ============================================================
 [ PENDING ] NEXT TASKS
 ============================================================
-17. Accounting module actual screens:
+27. Accounting module actual screens:
     - MGA page (agent side - manage/bind)
     - PAS page (policy admin storage)
     - Tabs: Policies, Agents, Bordereaux, Reports etc.
 
-18. Insurance - claims flow (claim register, loss details) - dummy abhi
+28. Insurance - claims flow (claim register, loss details) - dummy abhi
 
-19. Multi-step registration (org signup) - abhi single admin hai
+29. Multi-step registration (org signup) - abhi single admin hai
 
-20. Username/password change + profile page - abhi nahi
+30. Username/password change + profile page - abhi nahi
 
-21. Reports / analytics module
+31. Reports / analytics module

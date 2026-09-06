@@ -17,8 +17,31 @@ async function findById(id, options = {}) {
     return User.findById(id).session(options.session);
 }
 
+async function findByTenantId(tenantId, options = {}) {
+    return User.find({ tenantId })
+        .sort({ createdAt: -1 })
+        .populate("roleId", "name key")
+        .session(options.session);
+}
+
+async function findByIdAndTenant(id, tenantId, options = {}) {
+    return User.findOne({ _id: id, tenantId })
+        .populate("roleId", "name key")
+        .session(options.session);
+}
+
+async function updateById(id, update, options = {}) {
+    return User.findByIdAndUpdate(id, update, {
+        returnDocument: "after",
+        runValidators: true,
+        session: options.session,
+    })
+        .populate("roleId", "name key")
+        .session(options.session);
+}
+
 async function countByRoleId(roleId, options = {}) {
     return User.countDocuments({ roleId }).session(options.session);
 }
 
-module.exports = { create, findByEmail, findById, countByRoleId };
+module.exports = { create, findByEmail, findById, findByTenantId, findByIdAndTenant, updateById, countByRoleId };

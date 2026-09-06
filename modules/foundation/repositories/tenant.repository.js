@@ -13,4 +13,16 @@ async function findByCode(code, options = {}) {
     return Tenant.findOne({ code: code.toUpperCase() }).session(options.session);
 }
 
-module.exports = { create, findById, findByCode };
+async function findAll(options = {}) {
+    return Tenant.find({}).sort({ createdAt: -1 }).session(options.session);
+}
+
+async function updateById(id, update, options = {}) {
+    return Tenant.findByIdAndUpdate(id, update, {
+        returnDocument: "after",
+        runValidators: true,
+        session: options.session,
+    }).session(options.session);
+}
+
+module.exports = { create, findById, findByCode, findAll, updateById };

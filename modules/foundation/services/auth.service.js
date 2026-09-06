@@ -88,6 +88,9 @@ async function login({ email, password }) {
     }
 
     if (user.status !== "active") {
+        if (user.status === "suspended") {
+            throw new HttpError(403, "ACCOUNT_SUSPENDED", "Account is suspended. Contact your administrator");
+        }
         throw new HttpError(403, "ACCOUNT_INACTIVE", "User account is not active");
     }
 
