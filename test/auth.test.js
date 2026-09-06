@@ -1,6 +1,8 @@
 const { test, before, after, beforeEach } = require("node:test");
 const assert = require("node:assert/strict");
 
+process.env.TEST_DB_SUFFIX = "auth";
+
 const app = require("../app");
 const {
     connectTestDB,
@@ -49,14 +51,21 @@ const registerBody = {
 };
 
 async function api(path, options = {}) {
+    const { headers, ...rest } = options;
     const response = await fetch(`${baseUrl}${path}`, {
-        headers: { "Content-Type": "application/json", ...(options.headers || {}) },
-        ...options,
-        body: options.body ? JSON.stringify(options.body) : undefined,
+        ...rest,
+        headers: { "Content-Type": "application/json", ...(headers || {}) },
+        body: rest.body ? JSON.stringify(rest.body) : undefined,
     });
+    let body = null;
+    try {
+        body = await response.json();
+    } catch (error) {
+        body = null;
+    }
     return {
         status: response.status,
-        body: await response.json(),
+        body,
     };
 }
 

@@ -18,6 +18,9 @@ function toPublic(tenant) {
         name: tenant.name,
         code: tenant.code,
         businessType: tenant.businessType,
+        email: tenant.email,
+        phone: tenant.phone,
+        website: tenant.website,
         status: tenant.status,
         setupStage: tenant.setupStage,
     };

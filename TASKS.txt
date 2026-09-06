@@ -1,0 +1,134 @@
+============================================================
+FINANCE ACCOUNTING PROJECT - TASK TRACKER
+============================================================
+
+NOTE: Frontend = finance_accounting_frontend
+      Backend  = finance_accounting_backend (ye folder)
+
+------------------------------------------------------------
+[ DONE ] AUTH & LOGIN
+------------------------------------------------------------
+1. AuthSystem - login / register / me (JWT token)
+   - Backend: modules/foundation/auth - auth.controller.js, auth.service.js
+   - JWT me sirf {userId, tenantId, roleId} - baaki sab DB se load hota hai
+   - Access token only, 8hr expiry
+   - Frontend: /login page + AuthContext (user/role/tenant/subscription)
+   - LIVE VERIFIED: admin@southlake.com / 12345678 (real DB - Finance_Accounting)
+
+------------------------------------------------------------
+[ DONE ] ROLES & PERMISSIONS (Backend)
+------------------------------------------------------------
+2. Permission catalog - modules/foundation/constants/permissions.js
+   - Modules: roles, users, tenants, subscriptions, accounting, insurance
+   - Actions: read, create, update, delete
+   - Super admin = *.* (sab kuch)
+
+3. Roles CRUD (/api/roles)
+   - list, create, update, delete (jakarta / kese bhi role)
+   - isSystem role protected
+   - ROLE_IN_USE 409 agar role ke under users hain
+   - requirePermission middleware lagaya hai route par
+
+4. Roles CRUD (/api/permissions) - permission list route
+
+------------------------------------------------------------
+[ DONE ] SUBSCRIPTION MODEL (Backend)
+------------------------------------------------------------
+5. Subscription Model
+   - plan (trial/starter/professional/enterprise)
+   - status (trialing/active/past_due/cancelled/expired)
+   - billingCycle (monthly/quarterly/yearly)
+   - startDate / endDate
+   - limits (users, storageGB, entities, monthlyBordereaux)
+   - modules = [{ key: "accounting", enabled: true, features: ["PAS","MGA"] }]
+
+6. Subscription CRUD (/api/subscriptions)
+   - GET / (view apni subscription)
+   - PATCH /:id (update - requireValidSubscription + subscriptions:update permission)
+   - Toggle ON/OFF module ka, limits update
+
+------------------------------------------------------------
+[ DONE ] PLANS & DUMMY PAYMENT (Backend)
+------------------------------------------------------------
+7. Plan catalog (SubscriptionPlan model)
+   - GET /api/plans route
+   - Seed via: npm run seed (backend)
+   - Trial $0, Starter $99, Professional $299, Enterprise $999 (monthly)
+   - Seed done on REAL DB (4 plans ho gaye)
+
+8. Payment flow (Payment model)
+   - POST /api/subscriptions/:id/pay
+   - Dummy card validation (cardholder, 13-19 digit card, MM/YY expiry, CVV)
+   - Plan price DB se; payment record DMP-xxxx banata hai
+   - Payment ke baad: subscription = active, plan update, limits update,
+     modules += PAS/MGA features, endDate = +30/90/365 days
+
+9. Subscription middleware (backend)
+   - requireValidSubscription: expiry check -> expired sub auto-cancel
+     (403 SUBSCRIPTION_EXPIRED)
+   - requireModule(moduleKey): module off ho to 403 MODULE_NOT_ENABLED
+   - Tenants/Roles/Permissions routes inke peeche guard hain
+
+------------------------------------------------------------
+[ DONE ] FRONTEND - MODULES & SUBSCRIPTION
+------------------------------------------------------------
+10. Module Catalog (frontend)
+    - src/modules/config.js
+    - Accounting = LIVE (PAS + MGA)
+    - Claims, Reinsurance, Analytics, Partnerships = dummy (future)
+
+11. Modules page (/modules)
+    - ModulesPage.jsx - sab modules cards
+    - ModuleDetailPage.jsx - per module detail + Subscribe toggle
+
+12. Subscription page (/subscription)
+    - SubscriptionPage.jsx - current plan/status/renews/includes chips
+    - Plan cards (trial/starter/professional/enterprise) + limits
+    - Expired banner agar sub cancel/past_due
+    - DummyPayModal.jsx - dummy card form -> pay -> refresh
+    - Nav me "Subscription" item (CreditCard icon)
+    - Feature chips ab subscription.modules[].features se aate hain (PAS/MGA)
+
+13. Frontend infra
+    - src/api/http.js = get/post/patch (+ token header, error handling)
+    - src/api/subscription.js = getSubscription/updateSubscription/getPlans/paySubscription
+    - AuthContext.refreshSession() added
+    - Vite proxy /api -> localhost:3001
+
+------------------------------------------------------------
+[ DONE ] TESTS & QUALITY
+------------------------------------------------------------
+14. Backend tests - 27/27 PASSING (npm test)
+    - test/auth.test.js, test/role.test.js, test/subscription.test.js,
+      test/payment.test.js
+    - Test DB isolation: per-file suffix, drop DB on connect/disconnect
+    - --test-concurrency=1
+
+15. Frontend lint + build CLEAN
+    - npm run lint (oxlint) - koi error nahi
+    - npm run build - 1862 modules, success
+
+16. E2E SMOKE TEST (live, real DB) - SAB PASS
+    - Login via proxy -> token OK
+    - GET /plans -> 4 plans
+    - Dummy pay ($99 starter) -> subscription active, limits updated,
+      PAS/MGA included, DMP reference created
+    - Force expiry -> 403 SUBSCRIPTION_EXPIRED + sub auto-cancelled
+    - Renewal after cancel -> active again
+    - Restore trial state (southlake)
+
+============================================================
+[ PENDING ] NEXT TASKS
+============================================================
+17. Accounting module actual screens:
+    - MGA page (agent side - manage/bind)
+    - PAS page (policy admin storage)
+    - Tabs: Policies, Agents, Bordereaux, Reports etc.
+
+18. Insurance - claims flow (claim register, loss details) - dummy abhi
+
+19. Multi-step registration (org signup) - abhi single admin hai
+
+20. Username/password change + profile page - abhi nahi
+
+21. Reports / analytics module

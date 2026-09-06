@@ -14,8 +14,13 @@ const moduleSchema = new Schema(
       type: Boolean,
       default: true,
     },
+
+    features: {
+      type: [String],
+      default: [],
+    },
   },
-  { _id: false }
+  { _id: false },
 );
 
 const subscriptionSchema = new Schema(
@@ -31,24 +36,13 @@ const subscriptionSchema = new Schema(
 
     plan: {
       type: String,
-      enum: [
-        "trial",
-        "starter",
-        "professional",
-        "enterprise",
-      ],
+      enum: ["trial", "starter", "professional", "enterprise"],
       default: "trial",
     },
 
     status: {
       type: String,
-      enum: [
-        "trialing",
-        "active",
-        "past_due",
-        "cancelled",
-        "suspended",
-      ],
+      enum: ["trialing", "active", "past_due", "cancelled", "suspended"],
       default: "trialing",
       index: true,
     },
@@ -59,6 +53,7 @@ const subscriptionSchema = new Schema(
         {
           key: "accounting",
           enabled: true,
+          features: ["PAS", "MGA"],
         },
       ],
     },
@@ -103,14 +98,11 @@ const subscriptionSchema = new Schema(
       required: true,
     },
   },
-  { timestamps: true }
+  { timestamps: true },
 );
 
 subscriptionSchema.path("endDate").validate(function (value) {
   return value > this.startDate;
 }, "Subscription end date must be after start date");
 
-module.exports = mongoose.model(
-  "Subscription",
-  subscriptionSchema
-);
+module.exports = mongoose.model("Subscription", subscriptionSchema);

@@ -1,14 +1,11 @@
 const express = require("express");
 
-const tenantController = require("../controllers/tenant.controller");
+const permissionController = require("../controllers/permission.controller");
 const { requireAuth } = require("../../../middleware/auth.middleware");
 const { requireValidSubscription } = require("../../../middleware/subscription.middleware");
 
 const router = express.Router();
 
-router.use(requireAuth, requireValidSubscription);
-
-router.get("/", tenantController.listTenantsHandler);
-router.get("/:id", tenantController.getTenantHandler);
+router.get("/", requireAuth, requireValidSubscription, permissionController.listPermissions);
 
 module.exports = router;
