@@ -133,9 +133,170 @@ MGA Tenant + Carrier Tenant
 
 Carrier connection isolation ka exception nahi, controlled collaboration hai. Carrier ko MGA ke complete tenant documents nahi milte; authorized service sirf active connection ke allowed Bordereau/status data return karegi.
 
+### Client apna portfolio kaise banayega
+
+Veridex me har client login ke baad apne tenant ke andar one ya multiple portfolios bana sakega. Portfolio ek business book/program ka logical container hai, na ki ek doosra tenant.
+
+Examples:
+
+```text
+MGA Tenant
+  - Texas Commercial Trucking Book
+  - Southlake Carrier Program
+  - 2026 Renewal Portfolio
+
+Broker Tenant
+  - Commercial Clients
+  - Personal Lines Book
+
+Reinsurer Tenant
+  - Quota Share Treaty Book
+  - Property Catastrophe Book
+```
+
+### `Portfolio` aur `PortfolioItem`
+
+Files: `src/models/portfolio.js`, `src/models/portfolio-item.js`
+
+`Portfolio` header me tenant, owner entity, name, code, type, currency, visibility aur connected entities rakhe jaate hain. `PortfolioItem` me actual policy, party, entity, program ya treaty ke references rakhe jaate hain.
+
+Items ko portfolio document ke andar array me embed nahi kiya gaya, kyunki kisi MGA ke portfolio me thousands of policies ho sakti hain. Separate item documents se pagination, add/remove history, duplicate protection aur filtering possible hoti hai.
+
+Portfolio types:
+
+- `book_of_business`: broker/agency ka client book.
+- `mga_program`: MGA ka carrier/program book.
+- `carrier_program`: carrier ka delegated program portfolio.
+- `reinsurance_book`: reinsurer ke treaties/ceded business ka book.
+- `client_portfolio`: kisi specific client relationship ka grouped view.
+
+Portfolio ka ownership rule:
+
+```text
+Portfolio.tenantId -> owner tenant
+Portfolio.ownerEntityId -> us tenant ki entity
+PortfolioItem.tenantId -> same owner tenant
+PortfolioItem.portfolioId -> parent portfolio
+```
+
+Carrier connection ke baad bhi MGA ka portfolio carrier tenant me copy nahi hota. Carrier ko sirf active connection aur permission ke basis par relevant Bordereau ya shared portfolio view milega. Accounting journals dono tenants me separately generate honge.
+
+Portfolio ke financial totals direct fields se manually update nahi hone chahiye. Reports posted journals, policy transactions aur approved Bordereau transactions se calculate karengi. Isse portfolio view aur ledger balance ke beech mismatch nahi hoga.
+
 ---
 
-## 4. `common.js` - Shared Building Blocks
+## 4. QuickBooks Jaisa Product Experience
+
+User ko backend ke complex accounting concepts manually handle nahi karne chahiye. Product ka experience QuickBooks jaisa simple, guided aur action-based hoga; lekin Veridex ka domain insurance, MGA, carrier aur bordereau workflows honge.
+
+### User ko kya dikhega
+
+Login ke baad user ko apne selected tenant ka dashboard milega:
+
+```text
+Dashboard
+  - Cash and bank balance
+  - Accounts receivable
+  - Accounts payable
+  - Unpaid invoices and bills
+  - Pending approvals
+  - Recent transactions
+  - Bordereaux awaiting carrier action
+  - Profit and loss / balance sheet summary
+```
+
+User ko normally debit-credit entry type nahi karni hogi. Uske liye simple actions honge:
+
+```text
+Create invoice
+Record payment
+Add expense/bill
+Transfer money
+Reconcile bank transaction
+Send bordereau to carrier
+Approve settlement
+Run report
+```
+
+### Simple screen ke peeche actual accounting
+
+Example: user `Create Invoice` click karta hai.
+
+```text
+Invoice form
+  -> Invoice document save
+  -> InvoiceIssued AccountingEvent
+  -> Accounting rules account resolve karti hain
+  -> JournalEntry create hoti hai
+  -> Approval required ho to ApprovalRequest
+  -> AuditLog create hota hai
+```
+
+Iska matlab UI simple hai, par financial truth backend ke journal me maintain hoti hai. Direct browser/localStorage balance ko source of truth nahi banaya jayega.
+
+### QuickBooks-style modules aur Veridex mapping
+
+| User-facing module   | Backend/domain meaning                                             |
+| -------------------- | ------------------------------------------------------------------ |
+| Sales / Invoices     | Policyholder/customer receivables, invoices and credit notes       |
+| Expenses / Bills     | Carrier settlements, vendor bills and payables                     |
+| Banking              | Operating/trust accounts, imported transactions and reconciliation |
+| Chart of Accounts    | Entity-specific `Account` records                                  |
+| Reports              | Posted journal entries with dimensions                             |
+| Customers/Vendors    | `Party` records for insureds, brokers, carriers and vendors        |
+| Payroll-like payouts | Commissions and producer/MGA payables                              |
+| Custom workflow      | Bordereaux, carrier connections, approvals and settlements         |
+
+### Setup wizard ka thought process
+
+QuickBooks jaisa onboarding important hai. New tenant ko blank database dekar confuse nahi karna hai. Setup wizard step-by-step chalega:
+
+```text
+1. Organization and business type
+2. Base currency and fiscal year
+3. Legal entities
+4. Chart of accounts template
+5. Bank/trust accounts
+6. Users and roles
+7. Tax and commission settings
+8. Carrier/MGA connections
+9. Opening balances
+10. Go live
+```
+
+Har step tenant setup stage me record ho sakta hai. `Tenant.setupStage`, `Entity`, `Account`, `FiscalPeriod`, `TenantMembership` aur `Subscription` isi onboarding foundation ko support karte hain.
+
+### Guided accounting ka rule
+
+User action se accounting rule automatically choose hoga, lekin user ko preview aur explanation milni chahiye:
+
+```text
+You are recording: Carrier settlement
+Debit: Carrier Payable
+Credit: Premium Trust Bank
+Amount: USD 29,757.00
+```
+
+User-friendly language front end ka concern hai. Final account IDs, balanced journal, approval status aur audit data backend ka concern hai.
+
+### Insurance-specific difference
+
+QuickBooks ke basic invoice/bill workflow ke upar Veridex ye extra capabilities rakhega:
+
+- Policy and coverage context.
+- MGA-to-carrier connection request.
+- Transaction-based Bordereau submission.
+- DBA/DBM/DBC billing model rules.
+- Premium tax and commission splits.
+- Trust versus operating cash separation.
+- Carrier acceptance and settlement workflow.
+- Cross-tenant collaboration without cross-tenant accounting access.
+
+Isliye target product `QuickBooks clone` nahi hai. Target hai: **QuickBooks jaisa easy accounting experience plus insurance operations-grade controls.**
+
+---
+
+## 5. `common.js` - Shared Building Blocks
 
 File: `src/models/common.js`
 
@@ -193,7 +354,7 @@ Isse invalid values jaise `dollar` ya `US` reject hoti hain.
 
 ---
 
-## 5. `Tenant` Schema
+## 6. `Tenant` Schema
 
 File: `src/models/tenant.js`
 
@@ -242,7 +403,7 @@ Tenant root boundary hai. Baaki tenant-owned documents isi boundary ke andar reh
 
 ---
 
-## 6. `Entity` Schema
+## 7. `Entity` Schema
 
 File: `src/models/entity.js`
 
@@ -287,7 +448,7 @@ Code tenant ke andar unique hona chahiye. Lekin doosre tenant me same code valid
 
 ---
 
-## 7. `Account` Schema - Chart of Accounts
+## 8. `Account` Schema - Chart of Accounts
 
 File: `src/models/account.js`
 
@@ -344,7 +505,7 @@ Schema ye validate kar sakta hai ki parent ID ObjectId hai. Lekin ye prove nahi 
 
 ---
 
-## 8. `FiscalPeriod` Schema
+## 9. `FiscalPeriod` Schema
 
 File: `src/models/fiscal-period.js`
 
@@ -393,7 +554,7 @@ Do periods date range me overlap na karein, ye normal Mongoose unique index se e
 
 ---
 
-## 9. `JournalEntry` Schema - Core Accounting Record
+## 10. `JournalEntry` Schema - Core Accounting Record
 
 File: `src/models/journal-entry.js`
 
@@ -503,7 +664,7 @@ Schema me immutable fields aur update/delete hooks initial guard provide karte h
 
 ---
 
-## 10. Bordereau Ka Complete Scene
+## 11. Bordereau Ka Complete Scene
 
 README ke reference flow me bordereau important hai. Ab is workflow ke liye actual models implement hain: `carrier-connection.js`, `bordereau.js`, `bordereau-transaction.js`, aur `bordereau-ingestion-run.js`. Ledger foundation pehle banane ka reason ye tha ki bordereau ingestion ka final output journal entries hota hai.
 
@@ -739,7 +900,7 @@ Isse operational correction aur accounting correction alag rehte hain. Invalid b
 
 ---
 
-## 11. `AccountingEvent` Schema - Business Action Se Ledger Tak
+## 12. `AccountingEvent` Schema - Business Action Se Ledger Tak
 
 File: `src/models/accounting-event.js`
 
@@ -800,7 +961,7 @@ Event status transition transaction ke andar honi chahiye. Agar event `processed
 
 ---
 
-## 12. `ApprovalRequest` Schema
+## 13. `ApprovalRequest` Schema
 
 File: `src/models/approval-request.js`
 
@@ -865,7 +1026,7 @@ Schema array me duplicate approvers ya incorrect step order fully enforce nahi k
 
 ---
 
-## 13. `AuditLog` Schema
+## 14. `AuditLog` Schema
 
 File: `src/models/audit-log.js`
 
@@ -919,7 +1080,7 @@ Ideally business write aur audit write same MongoDB transaction me honi chahiye.
 
 ---
 
-## 14. Complete Connection Example
+## 15. Complete Connection Example
 
 Reference scenario: USD 39,260 invoice issue hui.
 
@@ -967,7 +1128,7 @@ Schemas me `ref` sirf relationship information deta hai. `ref` automatic authori
 
 ---
 
-## 15. Kya Schema Enforce Karta Hai, Kya Service Karegi
+## 16. Kya Schema Enforce Karta Hai, Kya Service Karegi
 
 ### Schema/Mongoose level
 
@@ -1003,7 +1164,7 @@ Ye separation intentional hai. Schema local document shape validate karta hai; s
 
 ---
 
-## 16. Naming Aur Indexing Ka Thought Process
+## 17. Naming Aur Indexing Ka Thought Process
 
 ### Naming
 
@@ -1029,7 +1190,7 @@ Unique indexes global nahi rakhe gaye, kyunki same account code ya entity code a
 
 ---
 
-## 17. Future Schemas Kaise Add Honge
+## 18. Future Schemas Kaise Add Honge
 
 Next domain layers is dependency order me add karni chahiye:
 
@@ -1060,7 +1221,7 @@ Domain module ko direct ledger totals update nahi karne chahiye.
 
 ---
 
-## 18. Current Design Ka Short Summary
+## 19. Current Design Ka Short Summary
 
 Simple words me:
 
@@ -1075,9 +1236,13 @@ Simple words me:
 - `User` global login identity hai.
 - `TenantMembership` user ko tenant-specific role aur entity access deta hai.
 - `Subscription` SaaS plan, billing status aur product limits rakhta hai.
+- `Portfolio` client ka tenant-owned business book/program define karta hai.
+- `PortfolioItem` portfolio ke andar policies, parties, entities, programs ya treaties ko scalable way me link karta hai.
 - `CarrierConnection` MGA aur carrier tenants ke beech controlled request/approval boundary hai.
 - `BordereauTransaction` policy-level production ko transaction basis par validate karta hai.
 
 Current code SaaS persistence foundation tak aa gaya hai. Complete SaaS workflow ke liye next implementation auth routes, JWT/refresh-token service, tenant-context middleware, membership authorization, carrier connection request APIs, Bordereau submission/acceptance APIs, aur accounting transaction service honge.
+
+Product direction: user experience QuickBooks jaisa simple aur guided hoga, lekin backend insurance operations, multi-tenant isolation, approvals aur audit controls ke saath enterprise-grade rahega.
 
 Is design ka central rule hai: financial state ko directly mutate nahi karna; validated event ke through controlled journal posting karni hai.
