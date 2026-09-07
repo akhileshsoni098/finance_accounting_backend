@@ -6,6 +6,7 @@ const PLANS = ["trial", "starter", "professional", "enterprise"];
 const STATUSES = ["trialing", "active", "past_due", "cancelled", "suspended"];
 const CYCLES = ["monthly", "quarterly", "yearly"];
 const LIMIT_KEYS = ["users", "storageGB", "entities", "monthlyBordereaux"];
+const ALLOWED_KEYS = ["plan", "status", "billingCycle", "endDate", "modules", "limits"];
 
 function validateSubscriptionId(param) {
     if (!mongoose.isValidObjectId(param)) {
@@ -16,6 +17,12 @@ function validateSubscriptionId(param) {
 function validateUpdateSubscription(body) {
     const errors = [];
     const data = {};
+
+    for (const key of Object.keys(body || {})) {
+        if (!ALLOWED_KEYS.includes(key)) {
+            errors.push(`unknown field '${key}'`);
+        }
+    }
 
     if (body.plan !== undefined) {
         if (!PLANS.includes(body.plan)) {

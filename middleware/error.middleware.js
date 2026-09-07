@@ -19,6 +19,12 @@ function errorMiddleware(err, req, res, next) {
         return res.status(400).json({ error: { code: "VALIDATION_ERROR", message } });
     }
 
+    if (err.name === "CastError") {
+        return res
+            .status(400)
+            .json({ error: { code: "INVALID_INPUT", message: "Invalid id format" } });
+    }
+
     if (err.name === "JsonWebTokenError" || err.name === "TokenExpiredError") {
         return res
             .status(401)

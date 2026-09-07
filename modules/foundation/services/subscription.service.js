@@ -13,6 +13,7 @@ async function createDefaultSubscription(tenantId, options = {}) {
             modules: [{ key: "accounting", enabled: true, features: MODULE_FEATURES.accounting }],
             startDate: now,
             endDate: new Date(now.getTime() + TRIAL_DAYS * 24 * 60 * 60 * 1000),
+            limits: { users: 5, storageGB: 10, entities: 1, monthlyBordereaux: 100 },
         },
         options,
     );

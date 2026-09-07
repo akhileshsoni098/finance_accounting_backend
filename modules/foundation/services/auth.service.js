@@ -76,10 +76,30 @@ async function register(payload) {
     };
 }
 
-async function login({ email, password }) {
-    const user = await userService.getByEmail(email, { includePassword: true });
-    if (!user) {
+async function login({ email, password, tenantCode }) {
+    const candidates = await userService.getAllByEmail(email, { includePassword: true });
+    if (!candidates.length) {
         throw new HttpError(401, "INVALID_CREDENTIALS", "Invalid email or password");
+    }
+
+    let user;
+    if (tenantCode) {
+        const tenant = await tenantService.getTenantByCode(tenantCode);
+        if (!tenant) {
+            throw new HttpError(404, "TENANT_NOT_FOUND", "Tenant not found");
+        }
+        user = candidates.find((candidate) => String(candidate.tenantId) === String(tenant._id));
+        if (!user) {
+            throw new HttpError(401, "INVALID_CREDENTIALS", "Invalid email or password");
+        }
+    } else if (candidates.length > 1) {
+        throw new HttpError(
+            400,
+            "MULTIPLE_ACCOUNTS",
+            "This email exists in multiple tenants. Provide tenantCode to sign in",
+        );
+    } else {
+        user = candidates[0];
     }
 
     const passwordValid = await bcrypt.compare(password, user.passwordHash);
@@ -91,6 +111,9 @@ async function login({ email, password }) {
         if (user.status === "suspended") {
             throw new HttpError(403, "ACCOUNT_SUSPENDED", "Account is suspended. Contact your administrator");
         }
+        if (user.status === "disabled") {
+            throw new HttpError(403, "ACCOUNT_DISABLED", "Account is disabled. Contact your administrator");
+        }
         throw new HttpError(403, "ACCOUNT_INACTIVE", "User account is not active");
     }
 
@@ -100,6 +123,9 @@ async function login({ email, password }) {
     }
 
     const subscription = await subscriptionService.getByTenantId(tenant._id);
+    if (subscription && subscription.endDate && subscription.endDate < new Date()) {
+        throw new HttpError(403, "SUBSCRIPTION_EXPIRED", "Tenant subscription has expired");
+    }
     if (subscription && !["trialing", "active", "past_due"].includes(subscription.status)) {
         throw new HttpError(403, "SUBSCRIPTION_SUSPENDED", "Tenant subscription is suspended");
     }

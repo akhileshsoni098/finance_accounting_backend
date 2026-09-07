@@ -197,17 +197,432 @@ NOTE: Frontend = finance_accounting_frontend
     - Lint CLEAN, build PASSES (292.02 kB)
 
 ============================================================
+[ DONE ] FOUNDATION AUDIT + HARDENING
+============================================================
+32. Auth hardening (backend)
+    - Ambiguous login fix: same email across tenants -> 400 MULTIPLE_ACCOUNTS
+      unless tenantCode passed (userRepository.findAllByEmail + tenant lookup)
+    - Login ab subscription expiry bhi check karta hai -> 403
+      SUBSCRIPTION_EXPIRED (pehle sirf middleware walla)
+    - disabled user login -> 403 ACCOUNT_DISABLED (suspended -> ACCOUNT_SUSPENDED)
+
+33. Default subscription limits
+    - createDefaultSubscription ab trial limits deta hai
+      {users:5, storageGB:10, entities:1, monthlyBordereaux:100}
+      (pehle limits undefined reh jati thi - isse trial/entity consistency)
+
+34. Validation hardening (backend)
+    - subscription.validator: unknown fields ab reject (400 INVALID_INPUT)
+    - role.validator: role key PATCH par change nahi ho sakta (400)
+    - error.middleware: CastError -> 400 INVALID_INPUT (pehle 500)
+
+35. Security hardening (backend)
+    - helmet() added (security headers)
+    - CORS tightened: CLIENT_ORIGIN env (default localhost:5173) - pehle open *
+    - express.json/urlencoded limit 1mb
+    - Login rate limiter: 10 attempts / 15 min / IP -> 429 RATE_LIMITED
+      (middleware/rate-limit.middleware.js, auth.routes par laga)
+
+36. Frontend resilience + permissions (frontend)
+    - http.js: 401 -> token clear + 'veridex:auth-expired' event
+    - AuthContext: expired listener (session reset) + can(module,action)
+      wildcard-aware permission helper
+    - Roles management page (jo pehle sirf backend me tha):
+      - src/api/roles.js (getRoles/createRole/updateRole/deleteRole/
+        getPermissionCatalog) + http.delete
+      - RolesPage.jsx (list/create/edit/delete, system role protected,
+        permission summary)
+      - CreateRoleModal.jsx (name/key/status + permission checkbox grid)
+      - /roles route + nav "Roles" (ShieldCheck) under Organization
+    - Permission-aware UI: Users Add/Suspend/Activate (users:*),
+      Tenant Edit (tenants:update), Subscription pay (subscriptions:update),
+      Module toggle (subscriptions:update)
+    - UsersPage "(you)" self-tag bug fix (context.user -> user, pehle never show)
+
+37. Foundation tests - 54/54 PASSING (npm test)
+    - Added: ambiguous duplicate-email login + tenantCode resolution,
+      disabled login ACCOUNT_DISABLED, expired-subscription login,
+      default trial limits, subscription unknown-field 400, role key update
+      400, foreign payment 404, login rate limit 429,
+      error-middleware unit tests (CastError/dup/500)
+    - test/rate-limit.test.js + test/error-middleware.test.js (new)
+
+38. FOUNDATION SMOKE (throwaway DB veridex_foundation_audit) - 42/42 PASS
+    - register/login/me, MULTIPLE_ACCOUNTS + tenantCode, super-admin list,
+      limited-user single-tenant, roles CRUD + key-change block, users CRUD
+      + suspend login, subscription patch + unknown-field block, dummy pay,
+      foreign payment 404, invalid objectid 400, expired middleware + login
+    - DB dropped after run (real DB Finance_Accounting untouched)
+    - Frontend: lint clean (pre-existing warnings only), build PASSES (303.78 kB)
+
+============================================================
+[ DONE ] ENTITY MODULE (ACCOUNTING)
+============================================================
+39. Entity backend (accounting)
+    - modules/accounting/models/entity.js: type mga/broker/carrier/insured/
+      agency/reinsurer; code ^[A-Z0-9]{2,12}$ uppercase; currency ^[A-Z]{3}$
+      default USD; status active/suspended/inactive; email/website validated;
+      address subdoc (_id:false); parentEntityId (same-tenant parent);
+      compound unique index {tenantId:1, code:1}
+    - entity.repository.js: create/findByTenantId (createdAt DESC)/
+      findByIdAndTenant (tenant-scoped)/updateById (returnDocument after,
+      runValidators)/countByTenantId
+    - entity.validator.js: CREATE_FIELDS + UPDATE_FIELDS whitelist
+      (code/type/tenantId IMMUTABLE -> 400); validateParentEntityId with
+      rejectNull (create null -> drop, update null -> clear parent);
+      create errors -> INVALID_INPUT, update -> VALIDATION_ERROR
+    - entity.service.js: create enforces subscription.limits.entities ->
+      403 ENTITY_LIMIT_REACHED (fallback trial=1/starter=3/pro=10/ent=50,
+      unknown plan -> 1); missing subscription -> 403 SUBSCRIPTION_NOT_FOUND;
+      parent must exist same tenant (ENTITY_FOREIGN_PARENT), self-parent
+      blocked (ENTITY_SELF_PARENT); update whitelist + explicit null clear
+    - entity.controller.js + routes: GET /, GET /:id, POST / (201),
+      PATCH /:id (NO delete) behind requireAuth -> requireValidSubscription
+      -> requireModule("accounting") -> requirePermission("accounting",
+      read/create/update); app.js mounts accountingRoutes at /api
+    - toPublic omits tenantId; tenantId injection blocked (400)
+
+40. Entity tests + verify (backend)
+    - test/entity.test.js (25 tests): create 201, list own-tenant only,
+      get/update 200, duplicate code 409 (same tenant) / allowed (cross),
+      foreign GET+PATCH 404, tenantId injection 400, foreign parent 400,
+      self parent 400 + valid parent set/clear (null), invalid type/email/
+      code/currency 400, unknown field 400, code/type change 400, missing
+      permission 403, no auth 401, module disabled 403 MODULE_NOT_ENABLED,
+      missing subscription 403, trial limit 1 -> 403 then bump to 3 -> 2 more
+      OK -> beyond 403, unknown plan fallback limit 1
+    - FULL SUITE: 79/79 PASSING (npm test)
+
+41. Entity frontend (frontend)
+    - src/api/entities.js (getEntities/getEntityById/createEntity/updateEntity)
+    - EntitiesPage.jsx: table (code/name/type/currency/status/actions),
+      Add/Edit gated by can("accounting", create/update)
+    - CreateEntityModal.jsx: create+edit combined; required type/code/name/
+      currency; optional legalName/regNo/taxId/email/phone/website/address/
+      notes; edit adds status + same-tenant parent dropdown (self excluded);
+      code/type read-only in edit; backend errors incl. ENTITY_LIMIT_REACHED
+    - Nav "Accounting" -> Entities (Landmark) with gated metadata (module
+      enabled + accounting:read); AppLayout SidebarContent filters gated items
+    - /entities route added; Lint CLEAN (pre-existing warnings only),
+      build PASSES (318.86 kB)
+
+42. ENTITY SMOKE (throwaway DB veridex_entity_dev) - 19/19 PASS
+    - register -> empty list -> create 201 -> trial limit 403 -> PATCH limits.entities=5
+      -> create again 201 -> duplicate code 409 -> list 2 -> GET :id ->
+      PATCH update -> limited user (no accounting perm) -> FORBIDDEN 403 ->
+      no auth 401 -> cross-tenant GET 404 -> module disabled MODULE_NOT_ENABLED
+    - DB dropped after run (real DB Finance_Accounting untouched)
+
+============================================================
+[ DONE ] CHART OF ACCOUNTS (ACCOUNTING)
+============================================================
+43. Account backend (accounting)
+    - modules/accounting/models/account.js: tenantId+entityId (ObjectId, ref,
+      immutable, index); code ^[A-Z0-9-_]{2,20}$ uppercase; name <=160,
+      description/notes <=500, accountSubtype <=80; accountType enum
+      asset/liability/equity/revenue/expense (immutable); parentAccountId
+      (same-entity), normalBalance enum debit/credit, isControlAccount=false,
+      allowPosting=true, status active/inactive, sortOrder default 0
+    - account.repository.js: create/findByTenantId(filters)/findByEntityId
+      (sortOrder asc, code asc, optional accountType/status/allowPosting
+      filters)/findByIdAndTenant/findByIdAndEntity/findByCode/
+      countByEntityId/updateById (returnDocument after, runValidators) - all
+      tenant-scoped, NO delete
+    - account.validator.js: strict unknown-field reject (create INVALID_INPUT,
+      update VALIDATION_ERROR); normalBalance derivatiion (asset/expense=debit,
+      liability/equity/revenue=credit), conflicting -> rejected; accountType
+      in update body -> 400 ACCOUNT_TYPE_IMMUTABLE; code/entityId/tenantId
+      immutable (update) & rejected (create)
+    - account.service.js: entity ownership checked on every op
+      (404 ENTITY_NOT_FOUND); balance-vs-type re-check -> 400
+      INVALID_NORMAL_BALANCE; parent same entity+tenant -> 400
+      ACCOUNT_FOREIGN_PARENT, self-parent -> 400 ACCOUNT_SELF_PARENT, null
+      clears parent; update whitelist (name/description/accountSubtype/
+      parentAccountId/normalBalance/isControlAccount/allowPosting/status/
+      sortOrder/notes); toPublic omits tenantId (keeps entityId)
+    - account.controller.js + routes: GET /, GET /:id, POST / (201),
+      PATCH /:id (NO delete) at /api/entities/:entityId/accounts
+      (Router mergeParams:true) behind requireAuth -> requireValidSubscription
+      -> requireModule("accounting") -> requirePermission("accounting",
+      read/create/update); app-level mount unchanged (accountingRoutes index)
+
+44. Account tests + verify (backend)
+    - test/account.test.js (36 tests): create asset/liability/revenue/expense,
+      derived + conflicting normalBalance, A-can-create/B-404, cross-tenant
+      list/get/update 404, account-not-found 404, duplicate code 409,
+      same code other entity OK, same code other tenant OK, invalid id/type/
+      code/unknown field/missing name 400, code/tenantId/entityId change 400,
+      ACCOUNT_TYPE_IMMUTABLE, parent same entity OK + foreign parent 400 +
+      self parent 400, read/create/update permission 403, no auth 401, module
+      disabled 403, inactive readable + status filter, accountType filter,
+      isControlAccount/allowPosting persist, whitelist update + null parent
+      clear, sortOrder+code ordering
+    - FULL SUITE: 115/115 PASSING (npm test) [79 previous + 36 new]
+
+45. Account frontend (frontend)
+    - src/api/accounts.js (getAccounts with query filters/getAccount/
+      createAccount/updateAccount)
+    - AccountsPage.jsx: /entities/:entityId/accounts; entity name/code header,
+      type + status filter selects, table (code/name/type/balance/posting/
+      status/actions), Add (accounting:create) + Edit (accounting:update)
+    - CreateAccountModal.jsx: create+edit combined; code/accountType read-only
+      in edit; normal balance auto-derived read-only; parent dropdown same
+      entity excluding self (grouping tag for allowPosting=false); control/
+      posting checkboxes; status + notes; backend error banner (incl.
+      ACCOUNT_TYPE_IMMUTABLE/409)
+    - EntitiesPage.jsx: "Chart of Accounts" row action -> /entities/:id/accounts
+      (visible on accounting:read); route added in App.jsx
+    - Lint CLEAN (pre-existing warnings only), build PASSES (332.07 kB)
+
+46. COA SMOKE (throwaway DB veridex_coa_dev) - 19/19 PASS
+    - register -> create entity -> empty list -> 1000 asset(debit) -> 2000
+      liability(credit) -> 4000 revenue(credit) -> duplicate 409 -> same code
+      other entity OK -> foreign entity create 404 -> child same entity OK ->
+      foreign parent 400 -> self parent 400 -> edit (name/status/control) ->
+      code change rejected -> permission denied 403 -> module OFF 403
+    - DB dropped after run (real DB Finance_Accounting untouched)
+
+47. COA UX fix (frontend) - top-level navigation + entity selector
+    - Accounting nav me "Chart of Accounts" (BookText, gated accounting:read)
+      top-level item -> /accounts -> auto-redirect to first entity; 0 entities
+      -> empty state + Create Entity
+    - /accounts/:entityId shows COA; entity selector dropdown in header
+      navigates /accounts/<newId> (refresh preserves selection)
+    - /entities/:entityId/accounts nested route kept as alias (same component)
+    - CreateAccountModal isEdit fix: Boolean(account?.id) (pehle {entityId}
+      truthy object edit mode kholta tha -> Add broken: "Edit undefined",
+      read-only code, "Invalid account id")
+    - Lint CLEAN (pre-existing warnings only), build PASSES (334.66 kB);
+      seed smoke on veridex_coa_dev 13/13 (7 sample accounts + dup + edit +
+      code immutable); DB dropped
+
+============================================================
+[ DONE ] FISCAL PERIOD (ACCOUNTING)
+============================================================
+48. Fiscal Period backend (accounting)
+    - modules/accounting/models/fiscalPeriod.js: tenantId+entityId (ObjectId,
+      ref, required, immutable, indexed); name <=100; code ^[A-Z0-9-_]{1,30}$
+      uppercase (unique {tenantId, entityId, code}); startDate/endDate (Date,
+      required, inclusive semantics); fiscalYear 1900-2100; status enum
+      open/closed/locked default open (indexed); isCurrent=false;
+      closedAt/closedBy/lockedAt/lockedBy server-controlled; notes <=500;
+      timestamps; secondary index {tenantId, entityId, startDate, endDate}
+    - fiscalPeriod.repository.js: create/findByTenantId(tenantId, entityId,
+      status/fiscalYear filters, startDate asc)/findByIdAndTenant/
+      findByCode/findOverlapping(startDate<=endDate && endDate>=startDate,
+      excludeId)/findCurrent/findPeriodForDate(date)/countByEntityId/
+      unsetCurrent/updateById - all tenant+entity safe, NO delete
+    - fiscalPeriod.validator.js: strict unknown-field reject (create
+      INVALID_INPUT, update VALIDATION_ERROR); tenantId/entityId/status/
+      closedAt/closedBy/lockedAt/lockedBy rejected; code uppercase-normalized
+      pre-regex; endDate >= startDate enforced; fiscalYear int 1900-2100
+    - fiscalPeriod.service.js: entity ownership on every op (404
+      ENTITY_NOT_FOUND); code dup pre-check -> 409 DUPLICATE_KEY; overlap
+      check -> 400 FISCAL_PERIOD_OVERLAP; create new period OPEN (optional
+      isCurrent clears prior current first); update whitelist
+      (name/startDate/endDate/fiscalYear/notes), date change only while OPEN
+      + re-check overlap, LOCKED -> 400 FISCAL_PERIOD_LOCKED (read-only);
+      close (open->closed, closedAt/closedBy, ALREADY_CLOSED/LOCKED),
+      reopen (closed->open clears closedBy/At, ALREADY_OPEN/LOCKED),
+      lock (closed->locked lockedAt/lockedBy, NOT_CLOSED/LOCKED);
+      setCurrent unset-then-set (entity-scoped); findPeriodForDate for
+      future Journal lookup; toPublic omits tenantId
+    - fiscalPeriod.controller.js + routes: GET /, GET /:id, POST / (201),
+      PATCH /:id, POST /:id/close, /:id/reopen, /:id/lock, /:id/current at
+      /api/entities/:entityId/fiscal-periods (Router mergeParams:true)
+      behind requireAuth -> requireValidSubscription -> requireModule
+      ("accounting") -> requirePermission("accounting", read/create/update);
+      NO delete; routes/index mounts before /entities
+
+49. Fiscal Period tests + verify (backend)
+    - test/fiscalPeriod.test.js (55 tests): create open 201 + uppercase code,
+      missing name/code/date 400, end<start 400, dup code same entity 409 /
+      other entity OK / other tenant OK; exact/partial/containing/endpoint
+      overlap 400 FISCAL_PERIOD_OVERLAP, adjacent OK, overlap other entity OK;
+      foreign entity create 404, foreign period GET/PATCH/CLOSE/REOPEN/LOCK
+      404; tenantId/entityId injection 400; closedAt/closedBy/lockedAt/
+      lockedBy client-supplied 400; open date update valid + overlap
+      rejected; closed dates immutable; code/entityId/tenantId change 400;
+      close + closedBy/At, close twice 400, reopen + cleared metadata, lock +
+      lockedBy/At, locked reopen 400, locked update 400, lock-again 400,
+      open-lock 400 NOT_CLOSED; set current, second unsets first,
+      entity-scoped, foreign current 404 (ENTITY_NOT_FOUND); read/create/
+      update permission 403; no auth 401; module disabled 403; date lookup
+      inside/outside/adjacent boundaries/unambiguous; DELETE endpoint 404;
+      list ordered by startDate; get one
+    - FULL SUITE: 170/170 PASSING (npm test) [115 previous + 55 new]
+
+50. Fiscal Period frontend (frontend)
+    - src/api/fiscalPeriods.js (list/get/create/update/close/reopen/lock/
+      setCurrent on /entities/:entityId/fiscal-periods)
+    - FiscalPeriodsPage.jsx: /fiscal-periods/:entityId + alias
+      /entities/:entityId/fiscal-periods; entity selector dropdown -> navigate
+      (refresh preserves selection); table (code/name/start/end/year/status/
+      CURRENT/actions); OPEN -> Edit/Current/Close, CLOSED -> Edit/Reopen/Lock,
+      LOCKED -> view-only; StatusBadge open/closed/locked tones + indigo
+      CURRENT pill; success banner; no delete
+    - CreateFiscalPeriodModal.jsx: create (code/name/start/end/fiscalYear/
+      notes + optional set-as-current), edit code read-only + dates disabled
+      when closed + locked read-only; isEdit = Boolean(period?.id) + explicit
+      entityId prop
+    - ConfirmDialog.jsx: reusable overlay for close/reopen/lock confirmations
+      (no raw alert; lock shows final-state message)
+    - FiscalPeriodsHomePage.jsx: /fiscal-periods auto-redirects to first
+      entity / 0-entity empty state -> /entities
+    - nav "Accounting" -> Fiscal Periods (CalendarRange, gated accounting:
+      read); EntitiesPage row action "Fiscal Periods" (accounting:read)
+    - Lint CLEAN (pre-existing warnings only), build PASSES (352.61 kB)
+
+51. FISCAL PERIOD SMOKE (throwaway DB veridex_fiscal_period_dev) - 17/17 PASS
+    - register -> create entity -> APR open -> adjacent MAY -> overlap 400 ->
+      dup code 409 -> set APR current then MAY -> only MAY current -> edit
+      open period dates -> close MAY stores closedBy -> reopen clears
+      metadata -> close again -> lock stores lockedBy -> reopen locked 400 ->
+      locked dates immutable 400 -> foreign entity create 404 -> missing
+      permission 403 -> module OFF 403
+    - DB dropped after run (real DB Finance_Accounting untouched)
+
+============================================================
+[ DONE ] JOURNAL ENTRY + JOURNAL LINES (ACCOUNTING)
+============================================================
+52. Journal backend (accounting)
+    - modules/accounting/models/journalEntry.js: tenantId+entityId
+      (ObjectId, ref, required, immutable, indexed); journalNumber
+      (immutable) unique {tenantId, entityId, journalNumber}; entryDate
+      (Date, required); fiscalPeriodId (ObjectId, ref, required, NOT
+      immutable - server reassigns on draft date change); status enum
+      draft/posted default draft; reference <=100, description <=255,
+      notes <=500; currency (default USD); totalDebit/totalCredit (BigInt-safe
+      Number, server-computed, NOT immutable); source/sourceId (future
+      event-driven journals); idempotencyKey partial unique
+      {tenantId, idempotencyKey} (partialFilterExpression idempotencyKey
+      string type); reversalOfId/reversedById (reversal workflow deferred);
+      postedAt/postedBy server-controlled; secondary indexes
+      {tenantId, entityId, status} and {tenantId, entityId, entryDate}
+    - modules/accounting/models/journalLine.js: tenantId+entityId (immutable)
+      + journalEntryId (ref JournalEntry, immutable); lineNumber (per-journal
+      seq 1..N); accountId (ref Account, immutable); description <=255;
+      currency (derived from journal); debit/credit (one >0 exactly, other 0,
+      integer safe minor units); index {tenantId, entityId, journalEntryId}
+      and {tenantId, entityId, accountId}
+    - modules/accounting/models/journalNumberCounter.js: {tenantId, entityId}
+      compound unique + seq (findOneAndUpdate upsert $inc inside tx)
+    - journalEntry.repository.js: create/findManyByTenant (status + dateFrom/
+      dateTo via entryDate range + idIn union, sort entryDate desc)/
+      findByIdAndTenant/findByTenantIdAndIdempotencyKey/
+      transitionToPosted (atomic findOneAndUpdate _id+statchange draft
+      -> posted, server sets postedAt/postedBy)/updateById/removeById (only
+      used by compensating fallback)
+    - journalLine.repository.js: insertMany(ordered:true) inside tx +
+      findManyByJournalId (+ lineNumber sort)/deleteManyByJournalId/
+      findJournalIdsByAccount (distinct journalEntryId for accountId filter)
+    - journalEntry.validator.js: strict CREATE_FIELDS (entryDate/reference/
+      description/currency + source/sourceId/idempotencyKey/notes/lines)
+      and UPDATE_FIELDS (entryDate/reference/description/currency/notes/
+      lines) unknown -> 400; tenantId/entityId/journalNumber/status/
+      postedAt/postedBy/totalDebit/totalCredit/reversalOfId/reversedById
+      rejected; 2-100 lines INVALID_JOURNAL; each line one-side >0 integer
+      safe (else INVALID_JOURNAL_LINE); sum debit == sum credit else 400
+      JOURNAL_NOT_BALANCED; validateJournalId 400 for bad objectid
+    - journalEntry.service.js: period gate STRICTER on create AND update AND
+      post -- no period 404 FISCAL_PERIOD_NOT_FOUND, closed 400
+      FISCAL_PERIOD_CLOSED, locked 400 FISCAL_PERIOD_LOCKED; account gate:
+      same tenant+entity else 404 ACCOUNT_NOT_FOUND, inactive -> 400
+      ACCOUNT_INACTIVE, !allowPosting -> 400 ACCOUNT_NOT_POSTABLE, currency
+      != entity -> 400 CURRENCY_MISMATCH; journal numbers JE-000001 (per
+      entity seq via counter inside tx); create = real mongoose transaction
+      (confirmed supported on this cluster - auth.service already uses
+      withTransaction + full suite passes) with compensating fallback
+      createDraftJournalFallback (header -> lines -> removeById header on
+      failure) armed only if a transaction-unsupported error is detected;
+      update = transaction (header + fiscalPeriodId reassign on date change +
+      delete+insert all lines) with fallback; post via atomic
+      transitionToPosted (concurrent posts -> one 200 one 400); idempotent
+      replay returns existing journal WITH lines (200 vs 201), concurrent
+      same-key 11000 -> refetch; toPublicHeader/toPublicLine/toPublic
+    - journalEntry.controller.js + routes: GET /, GET /:journalId, POST /
+      (201, 200 replay; Idempotency-Key header OR body), PATCH /:journalId
+      (draft only -> 400 JOURNAL_POSTED_IMMUTABLE), POST /:journalId/post
+      at /api/entities/:entityId/journal-entries (Router mergeParams:true)
+      behind requireAuth -> requireValidSubscription -> requireModule
+      ("accounting") -> requirePermission("accounting", read/create/update);
+      NO delete; routes/index mounts before /entities
+    - models/index.js exports 6 accounting models (Entity, Account,
+      FiscalPeriod, JournalEntry, JournalLine, JournalNumberCounter)
+
+53. Journal tests + verify (backend)
+    - test/journalEntry.test.js (55 tests): 401 no auth, module OFF 403,
+      read-only viewer CAN list 200 + create/patch/post 403, create 201 +
+      JE-000001 + totals + currency default + lines stored, foreign entity
+      404, foreign account 404, unknown account objectid 400, all payload/
+      line/money rejections (missing lines, empty, single, >100, unbalanced,
+      both-zero, both-positive, negative, decimal, unsafe amount, invalid
+      accountId), server-managed fields rejected via paylod, no-orphan on
+      failed create, no-period 404/closed 400/locked 400 gates, inactive
+      account 400, !allowPosting 400, sibling-entity account 404, currency
+      mismatch 400, idempotency header + body + different-keys + overlong key
+      + replay 200 with lines, draft header update, cross-period move
+      reassigns fiscalPeriodId, line bulk replacement + totals recompute,
+      unbalanced update reject (journal unchanged), update inactive account
+      reject, posted-update 400, update server-managed fields reject, post
+      lifecycle + postedBy, double-post 400, post-into-closed 400, post with
+      deactivated account 400, DELETE route 404, concurrent posts race (one
+      200 one 400), concurrent idempotent create (one 201 one 200 same id),
+      sequential per-entity numbers JE-000001 then JE-000002 + second entity
+      restarts, get includes lines sorted by lineNumber, list summaries no
+      lines + status filter + date range + accountId filter + invalid date
+      400 + empty list + tenant isolation
+    - FULL SUITE: 225/225 PASSING (npm test) [170 previous + 55 new]
+
+54. Journal frontend (frontend)
+    - src/api/journalEntries.js (list/get/create/update/post on
+      /entities/:entityId/journal-entries) + src/api/http.js post() now
+      accepts extra headers -> Idempotency-Key sent on create
+    - JournalEntriesPage.jsx: /journal-entries/:entityId + alias
+      /entities/:entityId/journal-entries; entity selector -> navigate;
+      filters status + dateFrom + dateTo (debounced); table (journal #/date/
+      reference/description/total debit/total credit/status/actions); View
+      (any), Edit + Post (draft only, gated accounting:update); Post via
+      ConfirmDialog ("will become immutable"); success/error banners
+    - CreateJournalEntryModal.jsx: create+edit; entryDate/reference/
+      description + currency read-only (entity currency); lines grid with
+      account picker (active + allowPosting only), line description, debit/
+      credit (major units, converted to minor server-side units), add/remove
+      (2-100), live running total debit/credit + difference + Balanced/
+      Unbalanced pill, Save Draft disabled until >=2 lines balanced with one
+      side per line; client-generated idempotencyKey on create; isEdit =
+      Boolean(journal?.id); success state shows journal number
+    - JournalDetailModal.jsx: journal header meta (number/status pill/date/
+      reference/description/currency/totals/posting audit when posted) +
+      lines table (lineNumber/last-6 account id/description/debit/credit) +
+      totals footer
+    - JournalEntriesHomePage.jsx: /journal-entries auto-redirects to first
+      entity / 0-entity empty state -> /entities
+    - nav "Accounting" -> Journal Entries (ScrollText, gated accounting:read);
+      EntitiesPage row action "Journal Entries" (accounting:read)
+    - Lint CLEAN (pre-existing warnings only), build PASSES (380.11 kB)
+
+55. JOURNAL SMOKE (throwaway DB veridex_journal_dev) - 27/27 PASS
+    - register -> create entity -> accounts 1100(debit)/4000(credit) -> APR +
+      MAY open -> balanced draft 100000/100000 201 JE-000001 totals -> GET
+      includes 2 lines -> unbalanced 400 -> both-sides line 400 -> edit draft
+      lines + totals recompute -> unbalanced edit 400 -> post (postedBy) ->
+      edit posted 400 immutable -> double post 400 -> no period (June date)
+      404 -> closed period 400 -> locked period 400 -> currency mismatch 400
+      -> idempotent create 201 + replay 200 same id -> list 2 summaries no
+      lines -> limited role/user -> create 403 FORBIDDEN
+    - DB dropped after run (real DB Finance_Accounting untouched)
+    - Cluster 500-collection cap cleared (479/500 after dropping 13 junk
+      1-collection DBs per user choice); test suites peak ~491 - safe
+
+============================================================
 [ PENDING ] NEXT TASKS
 ============================================================
-27. Accounting module actual screens:
+56. ACCOUNTING -> GENERAL LEDGER + TRIAL BALANCE (next module)
+    - GL read models: post journal -> append posting lines (tenantId/
+      entityId/accountId/journalEntryId/entryDate/dr/cr), period-partitioned;
+      Trial Balance aggregates opening + current movements per account
+57. Accounting module actual screens:
     - MGA page (agent side - manage/bind)
     - PAS page (policy admin storage)
     - Tabs: Policies, Agents, Bordereaux, Reports etc.
-
-28. Insurance - claims flow (claim register, loss details) - dummy abhi
-
-29. Multi-step registration (org signup) - abhi single admin hai
-
-30. Username/password change + profile page - abhi nahi
-
-31. Reports / analytics module

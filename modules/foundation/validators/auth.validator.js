@@ -49,6 +49,9 @@ function validateLogin(body) {
     if (!body.password || typeof body.password !== "string" || body.password.length < 1) {
         errors.push("password is required");
     }
+    if (body.tenantCode !== undefined && typeof body.tenantCode === "string" && !/^[A-Za-z0-9]{2,12}$/.test(body.tenantCode)) {
+        errors.push("tenantCode must be 2-12 alphanumeric characters");
+    }
     if (errors.length > 0) {
         throw new HttpError(400, "INVALID_INPUT", errors.join("; "));
     }

@@ -1,0 +1,98 @@
+====================================================================
+VERIDEX FINANCE ACCOUNTING - SESSION CONTEXT (start here next session)
+Last updated: 2026-09-07
+====================================================================
+
+[BUILD STATE]
+All DONE through Journal Entry + Journal Lines (TASKS.txt tasks 52-55):
+Backend accounting: Entity -> Chart of Accounts -> Fiscal Period -> Journal.
+Full backend suite 225/225 PASSING; frontend lint clean + build passes (380 kB).
+Next task (#56): General Ledger + Trial Balance read models.
+
+[REPO / TWO FOLDERS]
+Backend  = C:\Users\akhil\OneDrive\Desktop\financeBackend\finance_accounting_backend
+Frontend = C:\Users\akhil\OneDrive\Desktop\financeBackend\finance_accounting_frontend
+Task log = backend/TASKS.txt (most authoritative history + decisions).
+Also: backend/thoughtprocess.md, backend/Readme.md.
+
+[RUN & VERIFY]
+- Backend dev:   npm run dev   (dir=backend)  -> http://localhost:3001
+- One test file: node --test --test-concurrency=1 test/journalEntry.test.js (dir=backend)
+- Full suite:    npm test      (~20-30 min; redirect to a log, generous timeout;
+                 one transient anomalous run happened once -> rerun, clean run is authoritative)
+- Frontend dev:  npm run dev   (dir=frontend) -> http://localhost:5173 (Vite proxy /api->3001)
+- Frontend lint: npm run lint  (oxlint; ONLY pre-existing warnings, no errors allowed)
+- Frontend build:npm run build
+
+[CRITICAL ENVIRONMENT]
+- DB = MongoDB Atlas SHARED cluster0. MONGO_URI reads from backend/.env via config/env.js
+  (JWT_ACCESS_SECRET too). Never paste the URI/password into files; smoke scripts set
+  process.env.MONGO_URI at top from the known pattern.
+- LIVE DB "Finance_Accounting" = demo tenant (Southlake / admin@southlake.com / 12345678)
+  + 4 seeded plans. NEVER touch/create/drop inside it. Dev+test ALWAYS on throwaway DBs.
+- CLUSTER CAP: 500 collections cluster-wide. Currently 479/500. Each npm test run spins
+  per-file DBs (peak ~491). If collection creation fails with a cap error, drop junk
+  1-collection DBs (list: TASKS.txt #55). Keep Finance_Accounting untouched.
+- mongoose 9.9.5: use returnDocument:"after", NOT new:true (deprecated).
+- Sessions/withTransaction ARE supported on this cluster (auth.service uses them; suite
+  passes) -> journal create/update use real transactions + compensating fallbacks.
+- Throwaway smoke pattern: veridex_<feature>_dev DB, script in
+  C:\Users\akhil\AppData\Local\Temp\opencode\<name>_smoke.js, drop DB in finally, exit 0/1.
+  Template reference: fiscal_period_smoke.js / journal_smoke.js.
+
+[ARCHITECTURE / CONVENTIONS]
+- Per module layer: models -> repositories (tenant+entity scoped always) -> validators
+  (strict unknown-field reject; create errors=INVALID_INPUT, update=VALIDATION_ERROR) ->
+  services (business rules, HttpError) -> controllers -> routes. Guard chain on every
+  route: requireAuth -> requireValidSubscription -> requireModule -> requirePermission.
+  error.middleware: CastError->400, 11000->409 DUPLICATE_KEY, HttpError->code, else 500.
+- Multi-tenant: ALL queries scoped {tenantId, entityId}; foreign access -> 404 (not 403).
+- NO physical DELETE on accounting entities; state via status transitions. Update=PATCH,
+  actions=POST sub-routes (/post, /close, /lock, /reopen, /current).
+- Error shape: { error: { code, message, field? } }.
+- Money = integer MINOR units (cents), whole safe integers, sums validated server-side.
+- Accounting route mount: backend/modules/accounting/routes/index.js mounts at /api;
+  entity/account/fiscalPeriod/journalEntry routes are /api/entities/:entityId/<resource>.
+
+[CURRENT MODULE DETAIL - JOURNAL ENTRY]
+- Models: journalEntry (status draft/posted, journalNumber JE-XXXXXX immutable,
+  fiscalPeriodId server-set NOT immutable, totals server-set, partial unique
+  {tenantId,idempotencyKey}, reversalOfId/reversedById present-but-unused);
+  journalLine (journalEntryId, lineNumber, accountId, debit XOR credit, minor units);
+  journalNumberCounter {tenantId,entityId,seq} for per-entity numbering.
+- Rules: create/update/post REQUIRE entryDate -> existing OPEN period (404 no period /
+  400 FISCAL_PERIOD_CLOSED / 400 FISCAL_PERIOD_LOCKED); 2-100 lines; one side per line;
+  debit sum == credit sum (JOURNAL_NOT_BALANCED); account same tenant+entity, active,
+  allowPosting (404/400/400); currency == entity currency (CURRENCY_MISMATCH).
+- Endpoints /api/entities/:entityId/journal-entries: GET (filters status/dateFrom/
+  dateTo/accountId), GET /:id (with lines), POST (201, 200 idempotent replay; header
+  Idempotency-Key OR body idempotencyKey), PATCH /:id (draft only -> 400
+  JOURNAL_POSTED_IMMUTABLE when posted), POST /:id/post (atomic; concurrent -> one 200
+  one 400). No DELETE.
+- Frontend pieces: src/api/journalEntries.js (create sends Idempotency-Key via
+  http.post(path, body, headers) - http.js post signature extended); pages
+  JournalEntriesHomePage/JournalEntriesPage (filters status+date range, totals table,
+  View/Edit/Post with ConfirmDialog "will become immutable"); components
+  CreateJournalEntryModal (line grid, live Balanced pill, Save disabled till 2+ balanced
+  lines, currency read-only, isEdit=Boolean(journal?.id), client crypto.randomUUID
+  idempotencyKey) + JournalDetailModal; nav "Journal Entries" (ScrollText) + routes +
+  EntitiesPage "Journal Entries" action.
+
+[NEXT TASK #56 - GENERAL LEDGER + TRIAL BALANCE (read models)]
+- Plan direction: on journal post -> append GL posting lines (tenantId/entityId/
+  accountId/journalEntryId/entryDate/dr/cr), period-partitioned; Trial Balance = opening
+  balance + current-period movements per account (sign by normalBalance). Use existing
+  journal post path as the write trigger. Same pattern: models->repo->validator->
+  service->controller->routes->tests->frontend (optional)->throwaway smoke->TASKS.txt.
+- Task #57 later: actual MGA/PAS insurance screens (journal engine stays generic;
+  insurance event-mapping via source/sourceId deferred).
+
+[KNOWN CAVEATS / OPEN ITEMS]
+- backend/app.js CORS allowedHeaders = ["Content-Type","Authorization"] only.
+  Works in dev (Vite proxy = same-origin) but a direct cross-origin browser call with
+  the Idempotency-Key header would be blocked. Add "Idempotency-Key" to allowedHeaders
+  if/when direct CORS calls matter.
+- Journal reversal workflow (reversalOfId/reversedById) NOT implemented - deferred.
+- source/sourceId on JournalEntry reserved for future insurance-driven journals.
+- Cluster 500-collection cap - keep ~480/500 floor, drop junk when needed.
+- Full npm test is slow (~20-30 min) and one flaky transient run was seen - rerun.

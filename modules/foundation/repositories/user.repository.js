@@ -13,6 +13,14 @@ async function findByEmail(email, options = {}) {
     return query.session(options.session);
 }
 
+async function findAllByEmail(email, options = {}) {
+    const query = User.find({ email: email.trim().toLowerCase() });
+    if (options.includePassword) {
+        query.select("+passwordHash");
+    }
+    return query.session(options.session);
+}
+
 async function findById(id, options = {}) {
     return User.findById(id).session(options.session);
 }
@@ -44,4 +52,4 @@ async function countByRoleId(roleId, options = {}) {
     return User.countDocuments({ roleId }).session(options.session);
 }
 
-module.exports = { create, findByEmail, findById, findByTenantId, findByIdAndTenant, updateById, countByRoleId };
+module.exports = { create, findByEmail, findAllByEmail, findById, findByTenantId, findByIdAndTenant, updateById, countByRoleId };

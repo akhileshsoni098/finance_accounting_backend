@@ -249,6 +249,30 @@ async function registerOther() {
     return response.body;
 }
 
+test("PATCH rejects changing role key with 400", async () => {
+    const registered = await register();
+    const created = await api("/api/roles", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${registered.token}` },
+        body: {
+            name: "Usher",
+            key: "usher",
+            permissions: [{ module: "tenants", actions: ["read"] }],
+        },
+    });
+    const roleId = created.body.role.id;
+
+    const response = await api(`/api/roles/${roleId}`, {
+        method: "PATCH",
+        headers: { Authorization: `Bearer ${registered.token}` },
+        body: { key: "renamed_key" },
+    });
+
+    assert.equal(response.status, 400);
+    assert.equal(response.body.error.code, "INVALID_INPUT");
+    assert.match(response.body.error.message, /key cannot be changed on update/);
+});
+
 test("system role cannot be updated or deleted", async () => {
     const registered = await register();
     const token = registered.token;

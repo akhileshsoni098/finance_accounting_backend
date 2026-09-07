@@ -30,6 +30,10 @@ async function getByEmail(email, options = {}) {
     return userRepository.findByEmail(email, options);
 }
 
+async function getAllByEmail(email, options = {}) {
+    return userRepository.findAllByEmail(email, options);
+}
+
 async function getById(id, options = {}) {
     return userRepository.findById(id, options);
 }
@@ -106,6 +110,7 @@ function toPublic(user) {
 module.exports = {
     createUser,
     getByEmail,
+    getAllByEmail,
     getById,
     listByTenant,
     getByIdAndTenant,

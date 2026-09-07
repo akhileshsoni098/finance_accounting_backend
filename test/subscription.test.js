@@ -160,6 +160,20 @@ test("PATCH rejects invalid plan and invalid limits with 400", async () => {
     assert.equal(badLimits.status, 400);
 });
 
+test("PATCH rejects unknown fields with 400", async () => {
+    const registered = await register();
+
+    const response = await api(`/api/subscriptions/${registered.subscription.id}`, {
+        method: "PATCH",
+        headers: { Authorization: `Bearer ${registered.token}` },
+        body: { plan: "starter", tenantId: "eavesdrop" },
+    });
+
+    assert.equal(response.status, 400);
+    assert.equal(response.body.error.code, "INVALID_INPUT");
+    assert.match(response.body.error.message, /unknown field 'tenantId'/);
+});
+
 test("PATCH foreign subscription returns 404", async () => {
     const registered = await register();
 

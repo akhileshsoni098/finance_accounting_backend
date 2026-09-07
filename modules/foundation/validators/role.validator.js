@@ -24,7 +24,9 @@ function validateRolePayload(body, { partial = false } = {}) {
     }
 
     if (!partial || body.key !== undefined) {
-        if (!body.key || typeof body.key !== "string" || !/^[a-z][a-z0-9_]*$/.test(body.key)) {
+        if (partial) {
+            errors.push("key cannot be changed on update");
+        } else if (!body.key || typeof body.key !== "string" || !/^[a-z][a-z0-9_]*$/.test(body.key)) {
             errors.push("key must match ^[a-z][a-z0-9_]*$");
         } else {
             data.key = body.key;

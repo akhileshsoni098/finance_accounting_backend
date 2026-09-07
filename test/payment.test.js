@@ -208,3 +208,27 @@ test("expired subscription is blocked by middleware and auto-cancelled", async (
     assert.equal(me.status, 200);
     assert.equal(me.body.subscription.status, "cancelled");
 });
+
+test("pay for a foreign subscription returns 404", async () => {
+    await seedPlans();
+    const registered = await register();
+
+    const other = await api("/api/auth/register", {
+        method: "POST",
+        body: {
+            ...registerBody,
+            tenant: { ...registerBody.tenant, code: "OTHER02", email: "info@other.com" },
+            admin: { displayName: "Neeraj", email: "neeraj@other.com", password: "secure-pass-123" },
+        },
+    });
+    assert.equal(other.status, 201);
+
+    const response = await api(`/api/subscriptions/${registered.subscription.id}/pay`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${other.body.token}` },
+        body: { subscriptionId: registered.subscription.id, planKey: "starter", card },
+    });
+
+    assert.equal(response.status, 404);
+    assert.equal(response.body.error.code, "SUBSCRIPTION_NOT_FOUND");
+});

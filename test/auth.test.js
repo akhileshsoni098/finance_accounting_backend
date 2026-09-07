@@ -239,3 +239,98 @@ test("GET /api/tenants/:id returns own tenant and 404 for foreign tenant", async
     const noAuth = await api(`/api/tenants/${ownId}`);
     assert.equal(noAuth.status, 401);
 });
+
+test("registration creates a trial subscription with full default limits", async () => {
+    const registered = await api("/api/auth/register", {
+        method: "POST",
+        body: registerBody,
+    });
+
+    assert.equal(registered.status, 201);
+    assert.deepEqual(registered.body.subscription.limits, {
+        users: 5,
+        storageGB: 10,
+        entities: 1,
+        monthlyBordereaux: 100,
+    });
+});
+
+test("login with duplicate email across tenants requires tenantCode and resolves the right tenant", async () => {
+    const first = await api("/api/auth/register", {
+        method: "POST",
+        body: {
+            ...registerBody,
+            tenant: { ...registerBody.tenant, code: "ACME01", email: "contact@acme.com" },
+            admin: { ...registerBody.admin, email: "shared@dualbiz.com" },
+        },
+    });
+    assert.equal(first.status, 201);
+
+    const second = await api("/api/auth/register", {
+        method: "POST",
+        body: {
+            ...registerBody,
+            tenant: { ...registerBody.tenant, code: "BETA02", email: "contact@beta.com", name: "Beta Corp" },
+            admin: { displayName: "Sita Rao", email: "shared@dualbiz.com", password: "secure-pass-123" },
+        },
+    });
+    assert.equal(second.status, 201);
+
+    const ambiguous = await api("/api/auth/login", {
+        method: "POST",
+        body: { email: "shared@dualbiz.com", password: "secure-pass-123" },
+    });
+    assert.equal(ambiguous.status, 400);
+    assert.equal(ambiguous.body.error.code, "MULTIPLE_ACCOUNTS");
+
+    const acmeLogin = await api("/api/auth/login", {
+        method: "POST",
+        body: { email: "shared@dualbiz.com", password: "secure-pass-123", tenantCode: "ACME01" },
+    });
+    assert.equal(acmeLogin.status, 200);
+    assert.equal(acmeLogin.body.user.id, first.body.user.id);
+
+    const betaLogin = await api("/api/auth/login", {
+        method: "POST",
+        body: { email: "shared@dualbiz.com", password: "secure-pass-123", tenantCode: "BETA02" },
+    });
+    assert.equal(betaLogin.status, 200);
+    assert.equal(betaLogin.body.user.id, second.body.user.id);
+});
+
+test("login with disabled user returns ACCOUNT_DISABLED", async () => {
+    const registered = await api("/api/auth/register", {
+        method: "POST",
+        body: registerBody,
+    });
+
+    await User.updateOne({ _id: registered.body.user.id }, { $set: { status: "disabled" } });
+
+    const response = await api("/api/auth/login", {
+        method: "POST",
+        body: { email: registerBody.admin.email, password: registerBody.admin.password },
+    });
+
+    assert.equal(response.status, 403);
+    assert.equal(response.body.error.code, "ACCOUNT_DISABLED");
+});
+
+test("login with expired subscription returns SUBSCRIPTION_EXPIRED", async () => {
+    const registered = await api("/api/auth/register", {
+        method: "POST",
+        body: registerBody,
+    });
+
+    await Subscription.updateOne(
+        { _id: registered.body.subscription.id },
+        { $set: { endDate: new Date(Date.now() - 1000) } },
+    );
+
+    const response = await api("/api/auth/login", {
+        method: "POST",
+        body: { email: registerBody.admin.email, password: registerBody.admin.password },
+    });
+
+    assert.equal(response.status, 403);
+    assert.equal(response.body.error.code, "SUBSCRIPTION_EXPIRED");
+});

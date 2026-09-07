@@ -14,6 +14,11 @@ module.exports = {
     mongoUri: process.env.MONGO_URI,
     jwtAccessSecret: process.env.JWT_ACCESS_SECRET,
     jwtExpiresIn: process.env.JWT_EXPIRES_IN || "8h",
-    clientOrigin: process.env.CLIENT_ORIGIN || "*",
+    clientOrigin:
+        process.env.CLIENT_ORIGIN || "http://localhost:5173,http://127.0.0.1:5173",
+    clientOrigins: (process.env.CLIENT_ORIGIN || "http://localhost:5173,http://127.0.0.1:5173")
+        .split(",")
+        .map((origin) => origin.trim())
+        .filter(Boolean),
     bcryptRounds: Number(process.env.BCRYPT_ROUNDS) || 10,
 };
